@@ -5,7 +5,7 @@ Bu script, sentetik bir hasta için FASTQ -> BAM -> VCF pipeline'ının tamamın
 
 Script tek bir hasta için kullanılabileceği gibi, `--auto` parametresiyle 3 klinik x 10 hasta olmak üzere toplam 30 hastanın VCF'lerini otomatik olarak üretebilir. `--joint` parametresi ise aynı işlemi yapmanın yanı sıra her kliniğin 10 hastasını tek bir çoklu-örnek (multi-sample) VCF dosyasında birleştirir.
 
-Tüm varyantlar **heterozigot (0/1)** olarak üretilir. Yani her varyant yalnızca bir haplotipte (hap2) bulunur; diğer haplotip (hap1) referans alelini taşır.
+Tüm varyantlar **homozigot-alternatif (1/1)** olarak üretilir. Yani her varyant her iki haplotipte de (hap1 ve hap2) bulunur; tüm read'ler alternatif aleli taşır.
 
 
 Gerekli Araçlar
@@ -152,7 +152,7 @@ Referans genom üzerine rastgele konumlara varyantlar yerleştirilir:
 - **Insertion**: 1-3 baz eklenmesi (örn. C -> CGA)
 - **Deletion**: 1-3 baz silinmesi (örn. TCA -> T)
 
-Tüm varyantlar **0/1 (heterozigot)** olarak atanır: varyant yalnızca hap2'de bulunur, hap1 referans alelini taşır. Bu sayede read'lerin yaklaşık yarısı referans, yarısı alternatif aleli taşır.
+Tüm varyantlar **1/1 (homozigot-alternatif)** olarak atanır: varyant her iki haplotipte de (hap1 ve hap2) bulunur. Bu sayede ilgili pozisyondaki tüm read'ler alternatif aleli taşır.
 
 Varyant dağılımı yaklaşık olarak %55 SNP, %25 insertion, %20 deletion şeklindedir.
 
@@ -198,7 +198,7 @@ Tek hasta modunda pipeline sonunda bir özet yazdırılır:
   Total variant records : 15
   SNPs                  : 7
   Indels                : 8
-  Genotypes             : {'0/1': 15, '1/1': 0, '0/0': 0}
+  Genotypes             : {'0/1': 0, '1/1': 15, '0/0': 0}
 ==================================================
 ```
 
@@ -259,7 +259,7 @@ VCF Çıktısı Nasıl Okunur
 
 ```
 #CHROM     POS    ID  REF  ALT  QUAL   FILTER  INFO                 FORMAT           patient1
-chr_synth  5318   .   C    G    222.2  .       DP=62;...;AC=1;AN=2  GT:PL:DP:AD      0/1:255,0,247:62:24,38
+chr_synth  5318   .   C    G    225.4  .       DP=69;...;AC=2;AN=2  GT:PL:DP:AD      1/1:255,208,0:69:0,69
 ```
 
 ### Sütunlar
@@ -282,7 +282,7 @@ chr_synth  5318   .   C    G    222.2  .       DP=62;...;AC=1;AN=2  GT:PL:DP:AD 
 | Alan   | Açıklama                                                              |
 |--------|-----------------------------------------------------------------------|
 | `DP`   | Toplam okuma derinliği (read depth).                                  |
-| `AC`   | Alternatif alel sayısı. Tüm varyantlar heterozigot olduğu için her zaman 1. |
+| `AC`   | Alternatif alel sayısı. Tüm varyantlar homozigot-alternatif olduğu için her zaman 2. |
 | `AN`   | Toplam alel sayısı (diploid için her zaman 2).                        |
 | `MQ`   | Ortalama hizalama kalitesi (mapping quality).                         |
 | `INDEL`| Bu alanın varlığı kaydın bir indel olduğunu belirtir.                 |
@@ -319,7 +319,7 @@ seed = base_seed + (klinik_indeksi * 1000) + (hasta_numarasi * 100)
 Teknik Notlar
 -------------
 
-- **Diploid simülasyon**: İki ayrı haplotip dizisi oluşturulur. Tüm varyantlar heterozigot (`0/1`) olduğu için yalnızca hap2'ye uygulanır; hap1 referans ile aynıdır. Read'ler %50-%50 olasılıkla iki haplotipin birinden örneklenir.
+- **Diploid simülasyon**: İki ayrı haplotip dizisi oluşturulur. Tüm varyantlar homozigot-alternatif (`1/1`) olduğu için her iki haplotipe de uygulanır. Read'ler %50-%50 olasılıkla iki haplotipin birinden örneklenir; ancak her iki haplotip de aynı varyantları taşıdığı için tüm read'ler alternatif aleli yansıtır.
 - **Fragment boyutu varyasyonu**: Fragment boyutu sabit değil, normal dağılımdan (sd = %15) örneklenir. Bu, gerçekçi Illumina kütüphanelerini taklit etmenin yanı sıra, bwa'nın indel içeren read'leri "proper pair" olarak işaretlemesi için kritiktir. Sabit fragment boyutunda, indel'in neden olduğu 1-3 bp'lik insert boyutu kayması, bwa tarafından "improper pair" olarak değerlendirilir ve bcftools bu read'leri yok sayar.
 - **Kalite skoru profili**: Read'lerin 3' ucuna doğru kalite düşmesi uygulanır (Illumina'ya özgü). Hata eklenmiş bazlara düşük kalite skoru atanır.
 - **Varyant aralığı**: Varyantlar birbirinden en az 10 bp uzakta yerleştirilir; referansın her iki ucunda 200 bp'lik bir marj bırakılır.

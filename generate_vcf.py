@@ -93,7 +93,7 @@ def introduce_variants(
 
         ref_base = reference[pos]
         variant_type = rng.choices(["snp", "ins", "del"], weights=[0.55, 0.25, 0.20])[0]
-        genotype = "0/1"  # all variants are heterozygous
+        genotype = "1/1"  # all variants are homozygous-alt
 
         if variant_type == "snp":
             alt_base = rng.choice([b for b in "ACGT" if b != ref_base])
