@@ -562,13 +562,15 @@ def merge_clinic_vcfs(clinic: str, clinic_num: int) -> None:
 
 
 def auto_generate(args: argparse.Namespace, joint: bool = False) -> None:
-    """Generate 10 patients x 3 clinics. VCFs go to klinikN/raw_variants/."""
+    """Generate 10 patients x 3 clinics (7 regular + 3 controls per clinic). VCFs go to klinikN/raw_variants/."""
     clinics = ["klinik1", "klinik2", "klinik3"]
     patients_per_clinic = 10
+    controls_per_clinic = 3
 
     mode_label = "JOINT" if joint else "AUTO"
     print(f"\n{'='*50}")
     print(f"  {mode_label} MODE: {len(clinics)} clinics x {patients_per_clinic} patients")
+    print(f"  ({patients_per_clinic - controls_per_clinic} regular + {controls_per_clinic} controls per clinic)")
     print(f"{'='*50}\n")
 
     for clinic_idx, clinic in enumerate(clinics):
@@ -583,7 +585,8 @@ def auto_generate(args: argparse.Namespace, joint: bool = False) -> None:
         else:
             shared_ref = None
 
-        for patient_num in range(1, patients_per_clinic + 1):
+        # Generate regular patients (with variants)
+        for patient_num in range(1, patients_per_clinic - controls_per_clinic + 1):
             sample_name = f"patient{patient_num}"
             seed = clinic_seed + (patient_num * 100)
 
@@ -591,6 +594,26 @@ def auto_generate(args: argparse.Namespace, joint: bool = False) -> None:
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 run_single_patient(args, tmpdir, sample_name, seed,
+                                   shared_ref=shared_ref)
+
+                src_vcf = os.path.join(tmpdir, "variants.vcf")
+                dst_vcf = os.path.join(vcf_dir, f"{sample_name}.vcf")
+                shutil.copy2(src_vcf, dst_vcf)
+
+            print(f"    -> {dst_vcf}")
+
+        # Generate control patients (0 variants)
+        for control_num in range(1, controls_per_clinic + 1):
+            sample_name = f"control{control_num}"
+            seed = clinic_seed + ((patients_per_clinic - controls_per_clinic + control_num) * 100)
+
+            print(f"\n>>> [{clinic}] Generating {sample_name} (control, 0 variants, seed={seed})")
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                # Create a modified args with 0 variants for controls
+                control_args = argparse.Namespace(**vars(args))
+                control_args.num_variants = 0
+                run_single_patient(control_args, tmpdir, sample_name, seed,
                                    shared_ref=shared_ref)
 
                 src_vcf = os.path.join(tmpdir, "variants.vcf")

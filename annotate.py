@@ -5,7 +5,6 @@ This script reads a joint VCF file (the one with all patients from one clinic)
 and creates a simple CSV table for each patient.
 The CSV has fake medical info + MSUD symptom flags.
 Easy to use for machine learning (like Elastic Net).
-Now also adds control patients if you use --control_no.
 """
 
 import argparse
@@ -18,13 +17,17 @@ def main():
     # 1. Read command line: user gives the path to the VCF file
     p = argparse.ArgumentParser(description="Annotate joint VCF for MSUD symptoms")
     p.add_argument("--path_to_vcf", required=True, help="Path to your joint VCF file (e.g. klinik1.vcf)")
-    p.add_argument("--control_no", type=int, default=0, help="Number of fake healthy control patients to add (default: 0)")
     args = p.parse_args()
     vcf = args.path_to_vcf
 
-    # 2. Count how many 1/1 variants each patient has
+    # 2. Parse VCF and extract per-patient features
     patients = []
-    counts = defaultdict(int)
+    variant_counts = defaultdict(int)  # total 1/1 variants
+    snp_counts = defaultdict(int)      # SNP variants
+    indel_counts = defaultdict(int)    # INDEL variants
+    depth_values = defaultdict(list)   # DP values for averaging
+    alt_depth_values = defaultdict(list)  # AD[1] values for averaging
+    
     with open(vcf) as f:
         for line in f:
             if line.startswith("##"):      # skip header lines that start with ##
@@ -32,11 +35,64 @@ def main():
             if line.startswith("#CHROM"):  # this line has the patient names
                 patients = line.strip().split("\t")[9:]
                 continue
+            
             fields = line.strip().split("\t")
+            if len(fields) < 10:
+                continue
+            
+            # Check if this is an INDEL (INFO field contains INDEL flag)
+            info_field = fields[7]
+            is_indel = "INDEL" in info_field
+            
+            # Parse FORMAT field to get field indices
+            format_field = fields[8]
+            format_parts = format_field.split(":")
+            
+            # Find indices for GT, DP, and AD
+            gt_idx = format_parts.index("GT") if "GT" in format_parts else None
+            dp_idx = format_parts.index("DP") if "DP" in format_parts else None
+            ad_idx = format_parts.index("AD") if "AD" in format_parts else None
+            
+            # Process each patient
             for i, pat in enumerate(patients, 9):
-                gt = fields[i].split(":")[0]   # get genotype (1/1 = has variant)
+                if i >= len(fields):
+                    continue
+                
+                sample_data = fields[i]
+                sample_parts = sample_data.split(":")
+                
+                # Get genotype
+                gt = sample_parts[gt_idx] if gt_idx is not None and gt_idx < len(sample_parts) else "."
+                
+                # Count variants by type
                 if gt == "1/1":
-                    counts[pat] += 1
+                    variant_counts[pat] += 1
+                    if is_indel:
+                        indel_counts[pat] += 1
+                    else:
+                        snp_counts[pat] += 1
+                    
+                    # Extract DP value
+                    if dp_idx is not None and dp_idx < len(sample_parts):
+                        dp_str = sample_parts[dp_idx]
+                        if dp_str != ".":
+                            try:
+                                dp_val = int(dp_str)
+                                depth_values[pat].append(dp_val)
+                            except ValueError:
+                                pass
+                    
+                    # Extract AD value (alt allele depth is AD[1])
+                    if ad_idx is not None and ad_idx < len(sample_parts):
+                        ad_str = sample_parts[ad_idx]
+                        if ad_str != ".":
+                            try:
+                                ad_parts = ad_str.split(",")
+                                if len(ad_parts) >= 2:
+                                    alt_depth = int(ad_parts[1])
+                                    alt_depth_values[pat].append(alt_depth)
+                            except (ValueError, IndexError):
+                                pass
 
     # 3. Create output CSV in the same folder
     out = os.path.join(os.path.dirname(vcf) or ".", 
@@ -50,35 +106,38 @@ def main():
 
     # 4. Write CSV with one row per patient
     with open(out, "w", newline="") as f:
-        w = csv.DictWriter(f, ["patient_id", "age", "sex", "variant_count"] + symptoms + ["msud_risk"])
+        w = csv.DictWriter(f, ["patient_id", "age", "sex", "variant_count", "snp_count",
+                               "indel_count", "avg_depth", "avg_alt_depth"] + symptoms + ["msud_risk"])
         w.writeheader()
 
-        # Real patients from the VCF
+        # Patients from the VCF (including controls generated by generate_vcf.py)
         for pat in patients:
-            c = counts[pat]                    # how many variants this patient carries
+            c = variant_counts[pat]           # total variants this patient carries
+            snp_c = snp_counts[pat]           # SNP variants
+            indel_c = indel_counts[pat]       # INDEL variants
+            
+            # Calculate average depth
+            depths = depth_values[pat]
+            avg_depth = sum(depths) / len(depths) if depths else 0
+            
+            # Calculate average alt depth
+            alt_depths = alt_depth_values[pat]
+            avg_alt_depth = sum(alt_depths) / len(alt_depths) if alt_depths else 0
+            
             row = {
                 "patient_id": pat,
                 "age": random.randint(0, 60),   # fake age in years
                 "sex": random.choice(["M", "F"]), # fake sex
                 "variant_count": c,
+                "snp_count": snp_c,
+                "indel_count": indel_c,
+                "avg_depth": round(avg_depth, 2),
+                "avg_alt_depth": round(avg_alt_depth, 2),
                 "msud_risk": "high" if c > 10 else "medium" if c > 5 else "low",
             }
             # fake symptoms (more variants = higher chance of symptoms)
             for s in symptoms:
                 row[s] = 1 if random.random() < min(1.0, c / 20) else 0
-            w.writerow(row)
-
-        # Add control patients (healthy, zero variants)
-        for i in range(1, args.control_no + 1):
-            row = {
-                "patient_id": f"control{i}",
-                "age": random.randint(0, 60),
-                "sex": random.choice(["M", "F"]),
-                "variant_count": 0,
-                "msud_risk": "low",
-            }
-            for s in symptoms:
-                row[s] = 0   # controls have no symptoms
             w.writerow(row)
 
     print(f"done → {out}")   # tells you where the CSV was saved
